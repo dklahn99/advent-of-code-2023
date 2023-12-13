@@ -63,10 +63,11 @@ fn main() {
             .for_each(|e| {symbol_graph.insert((row as i32, e.0), e.1);});
     }
 
+    // Part 1
     let mut ids_adj_to_syms: HashSet<i32> = HashSet::new();
 
-    for (pos, sym) in symbol_graph {
-        get_adj::<i32>(pos, &num_graph)
+    for (pos, _sym) in &symbol_graph {
+        get_adj::<i32>(*pos, &num_graph)
             .iter()
             .for_each(|x| {ids_adj_to_syms.insert(**x);});
     }
@@ -76,5 +77,28 @@ fn main() {
                             .map(|id| id_map.get(&id).unwrap())
                             .sum();
 
-    println!("Sum: {:?}",sum);
+    println!("Part 1: {:?}", sum);
+
+    // Part 2
+    let asterisks: Vec::<((i32, i32), &str)> = symbol_graph
+        .into_iter()
+        .filter(|(_pos, sym)| *sym == "*")
+        .collect();
+
+    let mut sum: i32 = 0;
+    for (pos, _sym) in asterisks {
+
+        let adj = get_adj(pos, &num_graph);
+        let adj_set: HashSet<i32> = HashSet::from_iter(adj.into_iter().cloned());
+
+        if adj_set.len() == 2 {
+            sum += adj_set
+                .into_iter()
+                .map(|i| id_map.get(&i).unwrap())
+                .product::<i32>();
+        }
+    }
+
+    println!("Part 2: {:?}", sum);
+
 }
