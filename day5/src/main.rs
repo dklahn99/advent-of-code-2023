@@ -2,11 +2,17 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Debug)]
+struct Range {
+    /// Defines the range [start, end)
+    start: i64,
+    end: i64,
+}
+
+#[derive(PartialEq, Eq, Hash, Debug)]
 struct RangeMapRule {
-    src_start: i64,
-    dest_start: i64,
-    len: i64,
+    src: Range,
+    dest: Range,
 }
 
 impl RangeMapRule {
@@ -18,16 +24,21 @@ impl RangeMapRule {
 
         assert!(as_ints.len() == 3);
 
+        let len = as_ints[2];
         return RangeMapRule {
-            src_start: as_ints[1],
-            dest_start: as_ints[0],
-            len: as_ints[2],
+            src: Range {
+                start: as_ints[1],
+                end: as_ints[1] + len,
+            },
+            dest: Range {
+                start: as_ints[0],
+                end: as_ints[0] + len,
+            },
         };
     }
 
     fn contains(&self, i: i64) -> bool {
-        let upper_bound = self.src_start + self.len;
-        if self.src_start <= i && i < upper_bound {
+        if self.src.start <= i && i < self.src.end {
             return true;
         }
         return false;
@@ -35,20 +46,20 @@ impl RangeMapRule {
 
     fn map(&self, i: i64) -> i64 {
         assert!(self.contains(i));
-        let offset = i - self.src_start;
-        return self.dest_start + offset;
+        let offset = i - self.src.start;
+        return self.dest.start + offset;
     }
 }
 
 struct RangeMap {
-    rules: HashSet<RangeMapRule>,
+    rules: Vec<RangeMapRule>,
 }
 
 impl FromIterator<RangeMapRule> for RangeMap {
     fn from_iter<I: IntoIterator<Item = RangeMapRule>>(iter: I) -> Self {
-        return RangeMap {
-            rules: HashSet::from_iter(iter),
-        };
+        let mut rules = Vec::from_iter(iter);
+        rules.sort_by_key(|x| x.src.start);
+        return RangeMap { rules: rules };
     }
 }
 
@@ -61,9 +72,60 @@ impl RangeMap {
         }
         return i;
     }
+
+    fn split_range_by_rules(&self, range: Range) -> HashSet<Range> {
+        ///
+        /// Partitions the given range into continous subranges based on the
+        /// boundaries of the contained rules.
+        ///
+        let mut output = HashSet::<Range>::new();
+
+        // TODO: can we make this code simpler by creating a list of boundaries from the rule bounds
+        //      and then building the subranges from the list of boundaries?
+
+        let mut i = range.start;
+        for rule in &self.rules {
+            // Handle the region before the current rule.
+            if i < rule.src.start {
+                output.insert(Range {
+                    start: i,
+                    end: rule.src.start,
+                });
+                i = rule.src.start;
+            }
+            assert!(i == rule.src.start);
+
+            // Clip the current region at range.end if applicable.
+            if rule.src.end >= range.end {
+                output.insert(Range {
+                    start: i,
+                    end: range.end,
+                });
+                i = range.end;
+                break;
+            }
+
+            // Add the rule as it's own subrange
+            output.insert(Range {
+                start: i,
+                end: rule.src.end,
+            });
+            i = rule.src.end;
+        }
+
+        // Handle the region after all rules
+        if i < range.end {
+            output.insert(Range {
+                start: i,
+                end: range.end,
+            });
+        }
+
+        return output;
+    }
 }
 
-const INPUT_FILE: &str = "src/input.txt";
+const INPUT_FILE: &str = "src/test_input.txt";
 
 fn parse_maps(lines: Vec<&str>) -> HashMap<&str, RangeMap> {
     let mut output: HashMap<&str, RangeMap> = HashMap::new();
@@ -95,6 +157,12 @@ fn chain_lookup(i: i64, maps: &HashMap<&str, RangeMap>, sequence: &[&str]) -> i6
     return chain_lookup(maps[map_name].map(i), maps, &sequence[1..]);
 }
 
+fn reduce_maps(a: RangeMap, b: RangeMap) -> RangeMap {
+    /// Collapses two RangeMaps into one.
+    /// E.g. the mapping x -> |a| -> |b| -> y into x -> |c| -> y
+
+}
+
 fn main() {
     let contents: String = fs::read_to_string(INPUT_FILE).expect("Unable to read the file");
 
@@ -120,6 +188,12 @@ fn main() {
 
     let locations = seed_nums.map(|i| chain_lookup(i, &maps, &map_sequence));
     println!("Part 1: min location {:?}", locations.min().unwrap());
+
+    let subranges = maps["soil-to-fertilizer"].split_range_by_rules(Range { start: 0, end: 100 });
+
+    for range in subranges {
+        println!("subrange:\t{:?}", range);
+    }
 
     // println!("{}", contents);
 }
