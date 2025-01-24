@@ -80,48 +80,23 @@ impl RangeMap {
         ///
         let mut output = HashSet::<Range>::new();
 
-        // TODO: can we make this code simpler by creating a list of boundaries from the rule bounds
-        //      and then building the subranges from the list of boundaries?
-
-        let mut i = range.start;
+        let mut boundaries_set = HashSet::<i64>::new();
+        boundaries_set.insert(range.start);
+        boundaries_set.insert(range.end);
         for rule in &self.rules {
-            // Handle the region before the current rule.
-            if i < rule.src.start {
-                output.insert(Range {
-                    start: i,
-                    end: rule.src.start,
-                });
-                i = rule.src.start;
-            }
-            assert!(i == rule.src.start);
-
-            // Clip the current region at range.end if applicable.
-            if rule.src.end >= range.end {
-                output.insert(Range {
-                    start: i,
-                    end: range.end,
-                });
-                i = range.end;
-                break;
-            }
-
-            // Add the rule as it's own subrange
-            output.insert(Range {
-                start: i,
-                end: rule.src.end,
-            });
-            i = rule.src.end;
+            boundaries_set.insert(rule.src.start);
+            boundaries_set.insert(rule.src.end);
         }
 
-        // Handle the region after all rules
-        if i < range.end {
-            output.insert(Range {
-                start: i,
-                end: range.end,
-            });
-        }
+        let mut boundaries_sorted = Vec::from_iter(boundaries_set);
+        boundaries_sorted.sort();
 
-        return output;
+        // Create Ranges from adjacent pairs in the sorted list
+        return boundaries_sorted
+            .iter()
+            .zip(boundaries_sorted.iter().skip(1))
+            .map(|(&s, &e)| Range { start: s, end: e })
+            .collect::<HashSet<Range>>();
     }
 }
 
@@ -157,11 +132,11 @@ fn chain_lookup(i: i64, maps: &HashMap<&str, RangeMap>, sequence: &[&str]) -> i6
     return chain_lookup(maps[map_name].map(i), maps, &sequence[1..]);
 }
 
-fn reduce_maps(a: RangeMap, b: RangeMap) -> RangeMap {
-    /// Collapses two RangeMaps into one.
-    /// E.g. the mapping x -> |a| -> |b| -> y into x -> |c| -> y
+// fn reduce_maps(a: RangeMap, b: RangeMap) -> RangeMap {
+//     /// Collapses two RangeMaps into one.
+//     /// E.g. the mapping x -> |a| -> |b| -> y into x -> |c| -> y
 
-}
+// }
 
 fn main() {
     let contents: String = fs::read_to_string(INPUT_FILE).expect("Unable to read the file");
