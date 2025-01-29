@@ -1,7 +1,6 @@
 use std::cmp;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::fs;
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
@@ -54,7 +53,6 @@ impl RangeMapRule {
     }
 
     fn map(&self, i: i64, reverse: Option<bool>) -> i64 {
-        // println!("DEBUG: {:?}\ti: {:?}\treverse: {:?}", self, i, reverse);
         assert!(self.contains(i, reverse));
 
         if reverse.unwrap_or(false) {
@@ -149,20 +147,58 @@ fn parse_maps(lines: Vec<&str>) -> HashMap<&str, RangeMap> {
     return output;
 }
 
+/// From the input values in input_ranges, returns the minimum output value
+fn find_min_output(input_ranges: &HashSet<Range>, map: &RangeMap) -> i64 {
+    fn overlap(r1: Range, r2: Range) -> Option<Range> {
+        if r1.end <= r2.start || r2.end <= r1.start {
+            return None;
+        }
+
+        let output = Some(Range {
+            start: cmp::max(r1.start, r2.start),
+            end: cmp::min(r1.end, r2.end),
+        });
+
+        return output;
+    }
+
+    // base case
+    if input_ranges.len() == 1 {
+        let range = input_ranges.iter().next().cloned().unwrap();
+        let min_value = map
+            .rules
+            .iter()
+            .map(|r| overlap(range, r.src))
+            .filter(|o| o.is_some())
+            .map(|r| map.map(r.unwrap().start, None))
+            .min()
+            .unwrap_or(0);
+
+        return min_value;
+    }
+
+    return input_ranges
+        .into_iter()
+        .map(|&r| find_min_output(&HashSet::from([r]), map))
+        .min()
+        .unwrap();
+}
+
 fn main() {
     let contents: String = fs::read_to_string(INPUT_FILE).expect("Unable to read the file");
 
     // Parse out seeds line
     let lines: Vec<&str> = contents.split("\n").collect::<Vec<_>>();
-    let seed_nums = lines[0][7..]
+    let seed_nums: Vec<i64> = lines[0][7..]
         .split(" ")
-        .map(|s| s.parse::<i64>().expect("Error parsing int"));
+        .map(|s| s.parse::<i64>().expect("Error parsing int"))
+        .collect();
 
     // Parse out list of split maps
     let mut maps = parse_maps(Vec::<&str>::from(&lines[2..]));
 
     // Traverse maps
-    let mut map_sequence: Vec<&str> = Vec::from([
+    let map_sequence: Vec<&str> = Vec::from([
         "seed-to-soil",
         "soil-to-fertilizer",
         "fertilizer-to-water",
@@ -178,28 +214,30 @@ fn main() {
         reduced_map = reduced_map.reduce(map);
     }
 
-    let locations = seed_nums.map(|i| reduced_map.map(i, None));
-    println!("Part 1: min location {:?}", locations.min().unwrap());
+    // Part 1:
+    let part1_result = find_min_output(
+        &seed_nums
+            .iter()
+            .map(|&n| Range {
+                start: n,
+                end: n + 1,
+            })
+            .collect(),
+        &reduced_map,
+    );
 
-    // // let subranges = maps["soil-to-fertilizer"].split_range_by_rules(Range { start: 0, end: 100 });
-    // // for range in subranges {
-    // //     println!("subrange:\t{:?}", range);
-    // // }
+    println!("Part 1: min location {:?}", part1_result);
 
-    // // let rule = RangeMapRule {
-    // //     src: Range {
-    // //         start: 98,
-    // //         end: 100,
-    // //     },
-    // //     dest: Range { start: 50, end: 52 },
-    // // };
-    // // let result = RangeMap::merge_rules(&rule, &maps["soil-to-fertilizer"]);
-
-    // let reduced = maps["seed-to-soil"].reduce(&maps["soil-to-fertilizer"]);
-    // for rule in &reduced.rules {
-    //     println!("rule:\t{:?}", rule);
-    // }
-    // println
-
-    // println!("{}", contents);
+    // Part 2:
+    let part2_result = find_min_output(
+        &seed_nums
+            .chunks(2)
+            .map(|c| Range {
+                start: c[0],
+                end: c[0] + c[1],
+            })
+            .collect(),
+        &reduced_map,
+    );
+    println!("Part 2: min location {:?}", part2_result);
 }
