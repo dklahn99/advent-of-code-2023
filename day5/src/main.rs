@@ -1,15 +1,16 @@
+use std::cmp;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 
-#[derive(PartialEq, Eq, Hash, Debug)]
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct Range {
     /// Defines the range [start, end)
     start: i64,
     end: i64,
 }
 
-#[derive(PartialEq, Eq, Hash, Debug)]
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct RangeMapRule {
     src: Range,
     dest: Range,
@@ -37,17 +38,31 @@ impl RangeMapRule {
         };
     }
 
-    fn contains(&self, i: i64) -> bool {
-        if self.src.start <= i && i < self.src.end {
+    fn contains(&self, i: i64, reverse: Option<bool>) -> bool {
+        let range: &Range;
+        if reverse.unwrap_or(false) {
+            range = &self.dest;
+        } else {
+            range = &self.src;
+        }
+
+        if range.start <= i && i < range.end {
             return true;
         }
         return false;
     }
 
-    fn map(&self, i: i64) -> i64 {
-        assert!(self.contains(i));
-        let offset = i - self.src.start;
-        return self.dest.start + offset;
+    fn map(&self, i: i64, reverse: Option<bool>) -> i64 {
+        // println!("DEBUG: {:?}\ti: {:?}\treverse: {:?}", self, i, reverse);
+        assert!(self.contains(i, reverse));
+
+        if reverse.unwrap_or(false) {
+            let offset = i - self.dest.start;
+            return self.src.start + offset;
+        } else {
+            let offset = i - self.src.start;
+            return self.dest.start + offset;
+        };
     }
 }
 
@@ -64,39 +79,136 @@ impl FromIterator<RangeMapRule> for RangeMap {
 }
 
 impl RangeMap {
-    fn map(&self, i: i64) -> i64 {
+    fn map(&self, i: i64, reverse: Option<bool>) -> i64 {
         for rule in &self.rules {
-            if rule.contains(i) {
-                return rule.map(i);
+            if rule.contains(i, reverse) {
+                return rule.map(i, reverse);
             }
         }
         return i;
     }
 
-    fn split_range_by_rules(&self, range: Range) -> HashSet<Range> {
-        ///
-        /// Partitions the given range into continous subranges based on the
-        /// boundaries of the contained rules.
-        ///
-        let mut output = HashSet::<Range>::new();
+    ///
+    /// Partitions the given range into continous subranges based on the
+    /// boundaries of the contained rules. Returns a set of tuples where
+    /// the first element is a range and the second element is the corresponding
+    /// rule if it exists.
+    ///
+    fn split_range_by_rules(&self, range: Range) -> HashSet<(Range, Option<&RangeMapRule>)> {
+        let mut output: HashSet<(Range, Option<&RangeMapRule>)> = HashSet::new();
 
-        let mut boundaries_set = HashSet::<i64>::new();
-        boundaries_set.insert(range.start);
-        boundaries_set.insert(range.end);
+        let mut i: i64 = range.start;
         for rule in &self.rules {
-            boundaries_set.insert(rule.src.start);
-            boundaries_set.insert(rule.src.end);
+            // self.rules is sorted by rule.src.start in the constructor
+
+            // If i is after the end of the rule, skip the rule.
+            // This should only happen at the very beginning when i = range.start
+            if rule.src.end <= i {
+                assert!(i == range.start);
+                continue;
+            }
+
+            // If there is a gap in the rules between i and rule.src.start
+            if i < rule.src.start {
+                output.insert((
+                    Range {
+                        start: i,
+                        end: rule.src.start,
+                    },
+                    None,
+                ));
+                i = rule.src.start;
+            }
+
+            output.insert((
+                Range {
+                    start: i,
+                    end: rule.src.end,
+                },
+                Some(rule),
+            ));
+            i = cmp::min(range.end, rule.src.end);
+
+            if range.end <= i {
+                break;
+            }
         }
 
-        let mut boundaries_sorted = Vec::from_iter(boundaries_set);
-        boundaries_sorted.sort();
+        // If there is remaining space between i and range.end
+        if i < range.end {
+            output.insert((
+                Range {
+                    start: i,
+                    end: range.end,
+                },
+                None,
+            ));
+        }
 
-        // Create Ranges from adjacent pairs in the sorted list
-        return boundaries_sorted
+        return output;
+    }
+
+    /// Create a new set of rules that are equivalent to the operation
+    /// x -> |rule| -> |map| -> y
+    fn merge_rules(rule: &RangeMapRule, map: &RangeMap) -> HashSet<RangeMapRule> {
+        let mut output: HashSet<RangeMapRule> = HashSet::new();
+        let range_rules = map.split_range_by_rules(rule.dest);
+
+        for (range, map_rule) in range_rules {
+            let dest: Range;
+            if map_rule.is_some() {
+                dest = Range {
+                    start: map_rule.unwrap().map(range.start, None),
+                    end: map_rule.unwrap().map(range.end - 1, None) + 1,
+                };
+            } else {
+                dest = range
+            }
+            let result = RangeMapRule {
+                src: Range {
+                    start: rule.map(range.start, Some(true)),
+                    end: rule.map(range.end - 1, Some(true)) + 1,
+                },
+                dest: dest,
+            };
+            output.insert(result);
+        }
+
+        return output;
+    }
+
+    /// Collapses two RangeMaps into one.
+    /// E.g. the mapping x -> |self| -> |other| -> y into x -> |new| -> y
+    fn reduce(&self, other: &RangeMap) -> RangeMap {
+        let self_boundaries: HashSet<i64> = (&self)
+            .rules
             .iter()
-            .zip(boundaries_sorted.iter().skip(1))
-            .map(|(&s, &e)| Range { start: s, end: e })
-            .collect::<HashSet<Range>>();
+            .flat_map(|r| [r.dest.start, r.dest.end])
+            .collect();
+        let other_boundaries: HashSet<i64> = other
+            .rules
+            .iter()
+            .flat_map(|r| [r.src.start, r.src.end])
+            .collect();
+        let mut boundaries: Vec<i64> = self_boundaries.union(&other_boundaries).copied().collect();
+        boundaries.sort();
+
+        let rules = boundaries
+            .iter()
+            .zip(boundaries.iter().skip(1))
+            .map(|(&s, &e)| RangeMapRule {
+                src: Range {
+                    start: self.map(s, Some(true)),
+                    end: self.map(e, Some(true)),
+                },
+                dest: Range {
+                    start: other.map(s, None),
+                    end: other.map(e, None),
+                },
+            })
+            .collect::<HashSet<RangeMapRule>>();
+
+        return RangeMap::from_iter(rules);
     }
 }
 
@@ -129,14 +241,8 @@ fn chain_lookup(i: i64, maps: &HashMap<&str, RangeMap>, sequence: &[&str]) -> i6
     }
 
     let map_name = sequence[0];
-    return chain_lookup(maps[map_name].map(i), maps, &sequence[1..]);
+    return chain_lookup(maps[map_name].map(i, None), maps, &sequence[1..]);
 }
-
-// fn reduce_maps(a: RangeMap, b: RangeMap) -> RangeMap {
-//     /// Collapses two RangeMaps into one.
-//     /// E.g. the mapping x -> |a| -> |b| -> y into x -> |c| -> y
-
-// }
 
 fn main() {
     let contents: String = fs::read_to_string(INPUT_FILE).expect("Unable to read the file");
@@ -164,11 +270,25 @@ fn main() {
     let locations = seed_nums.map(|i| chain_lookup(i, &maps, &map_sequence));
     println!("Part 1: min location {:?}", locations.min().unwrap());
 
-    let subranges = maps["soil-to-fertilizer"].split_range_by_rules(Range { start: 0, end: 100 });
+    // let subranges = maps["soil-to-fertilizer"].split_range_by_rules(Range { start: 0, end: 100 });
+    // for range in subranges {
+    //     println!("subrange:\t{:?}", range);
+    // }
 
-    for range in subranges {
-        println!("subrange:\t{:?}", range);
+    // let rule = RangeMapRule {
+    //     src: Range {
+    //         start: 98,
+    //         end: 100,
+    //     },
+    //     dest: Range { start: 50, end: 52 },
+    // };
+    // let result = RangeMap::merge_rules(&rule, &maps["soil-to-fertilizer"]);
+
+    let reduced = maps["seed-to-soil"].reduce(&maps["soil-to-fertilizer"]);
+    for rule in &reduced.rules {
+        println!("rule:\t{:?}", rule);
     }
+    println
 
     // println!("{}", contents);
 }
