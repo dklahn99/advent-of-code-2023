@@ -1,6 +1,9 @@
 use counter::Counter;
+use std::cmp::max_by;
 use std::cmp::Ordering;
 use std::fs;
+
+const CARD_STRENGTH: &str = "J23456789TQKA";
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum HandType {
@@ -17,11 +20,13 @@ enum HandType {
 struct Hand {
     handtype: HandType,
     cards: String,
+    best_hand: String,
 }
 
 impl Hand {
-    pub fn new(hand_str: &str) -> Self {
-        let char_counts = hand_str.chars().collect::<Counter<_>>();
+    pub fn new(cards: &String) -> Self {
+        let best_hand = replace_jokers(cards);
+        let char_counts = best_hand.chars().collect::<Counter<_>>();
         let count_counts = char_counts.values().collect::<Counter<_>>();
 
         let handtype = match (
@@ -40,15 +45,15 @@ impl Hand {
         };
 
         return Self {
-            handtype: handtype,
-            cards: hand_str.to_string(),
+            handtype,
+            cards: String::from(cards),
+            best_hand: String::from(best_hand),
         };
     }
 }
 
 impl Ord for Hand {
     fn cmp(&self, other: &Self) -> Ordering {
-        const CARD_STRENGTH: &str = "23456789TJQKA";
         let self_key = (
             &self.handtype,
             self.cards
@@ -76,7 +81,49 @@ impl PartialOrd for Hand {
     }
 }
 
+fn replace_jokers(cards: &String) -> String {
+    let num_jokers = cards.chars().filter(|c| *c == 'J').count();
+    if num_jokers == 0 {
+        return String::from(cards);
+    }
+    if num_jokers == 5 {
+        return String::from("AAAAA");
+    }
+
+    let char_counts = cards
+        .chars()
+        .filter(|c| *c != 'J')
+        .collect::<Counter<char>>();
+    let highest_count = char_counts
+        .most_common()
+        .first()
+        .expect("Error: no char counts")
+        .1;
+
+    let highest_count_chars: Vec<char> = char_counts
+        .iter()
+        .filter(|count| *count.1 == highest_count)
+        .map(|x| *x.0)
+        .collect();
+
+    let replace_joker_with_index = highest_count_chars
+        .iter()
+        .map(|c| CARD_STRENGTH.find(*c).expect("Invalid card character"))
+        .max()
+        .expect("Error getting highest count char");
+    let mut replace_joker_with = CARD_STRENGTH
+        .chars()
+        .nth(replace_joker_with_index)
+        .expect("Error getting nth char");
+
+    let result = cards.replace("J", replace_joker_with.to_string().as_str());
+
+    return result;
+}
+
 fn main() {
+    // Note: see commit 616feeb9 for the solution to part 1
+
     let contents: String = fs::read_to_string("src/input.txt").expect("Unable to read the file");
     let lines = contents.split("\n");
 
@@ -84,16 +131,16 @@ fn main() {
         .map(|l| l.split(' '))
         .map(|mut s| {
             (
-                Hand::new(s.next().unwrap()),
+                Hand::new(&s.next().unwrap().to_string()),
                 s.next().unwrap().parse::<usize>().unwrap(),
             )
         })
         .collect::<Vec<_>>();
     hands.sort();
 
-    let part1_result = hands
+    let part2_result = hands
         .iter()
         .enumerate()
         .fold(0, |sum, (rank, (hand, bid))| sum + (rank + 1) * bid);
-    println!("Part 1: {:?}", part1_result);
+    println!("Part 2: {:?}", part2_result);
 }
