@@ -55,7 +55,6 @@ fn main() {
 
     // Part 2
     let start_nodes: Vec<&str> = vec!["MTA", "QNA", "XCA", "BXA", "AAA", "VCA"];
-    // let start_nodes: Vec<&str> = vec!["11A"];
     let lengths: Vec<usize> = start_nodes
         .iter()
         .map(|sn| compute_path_to_z(sn, &sequence, &map).len() - 1)
